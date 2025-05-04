@@ -3,6 +3,9 @@ import User from "../models/user_model.js";
 import bcrypt from "bcryptjs";
 import cloudinary from "../lib/cloudinary.js";
 
+// Helper function to validate a 10-digit phone number
+const isValidPhoneNumber = (number) => /^\d{10}$/.test(number);
+
 export const signup = async (req, res) => {
   const { fullName, email, password, number } = req.body;
 
@@ -15,9 +18,14 @@ export const signup = async (req, res) => {
       return res.status(400).json({ message: "Password must be at least 6 characters" });
     }
 
-    const user = await User.findOne({ email });
+    if (!isValidPhoneNumber(number)) {
+      return res.status(400).json({ message: "Phone number must be exactly 10 digits" });
+    }
 
-    if (user) return res.status(400).json({ message: "Email already exists" });
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: "Email already exists" });
+    }
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
@@ -30,7 +38,6 @@ export const signup = async (req, res) => {
     });
 
     if (newUser) {
-      // generate jwt token here
       generateToken(newUser._id, res);
       await newUser.save();
 
@@ -78,8 +85,10 @@ export const resetPassword = async (req, res) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
 export const login = async (req, res) => {
   const { email, password } = req.body;
+
   try {
     const user = await User.findOne({ email });
 
@@ -119,24 +128,29 @@ export const logout = (req, res) => {
 
 export const updateProfile = async (req, res) => {
   try {
-    const { profilePic } = req.body;
+    const { profilePic, number } = req.body;
     const userId = req.user._id;
 
-    if (!profilePic) {
-      return res.status(400).json({ message: "Profile pic is required" });
+    const updateData = {};
+
+    if (profilePic) {
+      const uploadResponse = await cloudinary.uploader.upload(profilePic);
+      updateData.profilePic = uploadResponse.secure_url;
     }
 
-    const uploadResponse = await cloudinary.uploader.upload(profilePic);
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { profilePic: uploadResponse.secure_url },
-      { new: true }
-    );
+    if (number) {
+      if (!isValidPhoneNumber(number)) {
+        return res.status(400).json({ message: "Phone number must be exactly 10 digits" });
+      }
+      updateData.number = number;
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(userId, updateData, { new: true });
 
     res.status(200).json(updatedUser);
   } catch (error) {
-    console.log("error in update profile:", error);
-    res.status(500).json({ message: "Internal server error" });
+    console.log("Error in updateProfile controller:", error.message);
+    res.status(500).json({ message: "Internal Server Error" });
   }
 };
 

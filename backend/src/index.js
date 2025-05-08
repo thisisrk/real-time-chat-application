@@ -2,21 +2,23 @@ import express from "express";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import cors from "cors";
-
-import path from "path";
-
-import { connectDB } from "./lib/db.js";
-
+import { v2 as cloudinary } from "cloudinary";
+import { createServer } from "http";
+import { initializeSocket } from "./lib/socket.js";
+import connectDB from "./lib/db.js";
 import authRoutes from "./routes/auth_route.js";
 import messageRoutes from "./routes/message_route.js";
-import { app, server } from "./lib/socket.js";
+import userRoutes from "./routes/user_route.js";
 
+// Load environment variables
 dotenv.config();
 
-const PORT = process.env.PORT;
-const __dirname = path.resolve();
+const app = express();
+const PORT = process.env.PORT || 5001;
 
-app.use(express.json({ limit: '10mb' }));
+// Middleware
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(
   cors({
@@ -25,18 +27,29 @@ app.use(
   })
 );
 
+// Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/users", userRoutes);
 
-if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.join(__dirname, "../frontend/dist")));
+// Create HTTP server
+const server = createServer(app);
 
-  app.get("*", (req, res) => {
-    res.sendFile(path.join(__dirname, "../frontend", "dist", "index.html"));
-  });
-}
+// Initialize Socket.IO
+const io = initializeSocket(server);
 
+// Make io accessible to routes
+app.set("io", io);
+
+// Cloudinary configuration
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// Start server
 server.listen(PORT, () => {
-  console.log("server is running on PORT:" + PORT);
+  console.log(`Server is running on port ${PORT}`);
   connectDB();
 });

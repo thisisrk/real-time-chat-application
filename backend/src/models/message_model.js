@@ -18,9 +18,19 @@ const messageSchema = new mongoose.Schema(
     image: {
       type: String,
     },
+    status: {
+      type: String,
+      enum: ["sent", "delivered", "read"],
+      default: "sent",
+    },
   },
   { timestamps: true }
 );
+
+// Add indexes for performance optimization
+messageSchema.index({ senderId: 1 });
+messageSchema.index({ receiverId: 1 });
+messageSchema.index({ status: 1 });
 
 const Message = mongoose.model("Message", messageSchema);
 

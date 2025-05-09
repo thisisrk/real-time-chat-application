@@ -59,11 +59,30 @@ export const useChatStore = create((set, get) => ({
         messages: [...get().messages, newMessage],
       });
     });
+
+    // Listen for message status updates
+    socket.on("messageStatusUpdate", ({ messageId, status }) => {
+      set({
+        messages: get().messages.map((msg) =>
+          msg._id === messageId ? { ...msg, status } : msg
+        ),
+      });
+    });
+
+    // Listen for bulk read status updates
+    socket.on("bulkReadStatusUpdate", ({ from }) => {
+      set({
+        messages: get().messages.map((msg) =>
+          msg.senderId === from ? { ...msg, status: "read" } : msg
+        ),
+      });
+    });
   },
 
   unsubscribeFromMessages: () => {
     const socket = useAuthStore.getState().socket;
     socket.off("newMessage");
+    socket.off("messageStatusUpdate");
   },
 
   setSelectedUser: (selectedUser) => set({ selectedUser }),

@@ -2,7 +2,7 @@ import User from "../models/user_model.js";
 import Message from "../models/message_model.js";
 
 import cloudinary from "../lib/cloudinary.js";
-import { getReceiverSocketId, io } from "../lib/socket.js";
+import { getReceiverSocketId } from "../lib/socket.js";
 
 export const getUsersForSidebar = async (req, res) => {
   try {
@@ -26,7 +26,7 @@ export const getMessages = async (req, res) => {
         { senderId: myId, receiverId: userToChatId },
         { senderId: userToChatId, receiverId: myId },
       ],
-    });
+    }).sort({ createdAt: 1 });
 
     res.status(200).json(messages);
   } catch (error) {
@@ -41,11 +41,19 @@ export const sendMessage = async (req, res) => {
     const { id: receiverId } = req.params;
     const senderId = req.user._id;
 
+    if (!text && !image) {
+      return res.status(400).json({ error: "Message must contain either text or image" });
+    }
+
     let imageUrl;
     if (image) {
-      // Upload base64 image to cloudinary
-      const uploadResponse = await cloudinary.uploader.upload(image);
-      imageUrl = uploadResponse.secure_url;
+      try {
+        const uploadResponse = await cloudinary.uploader.upload(image);
+        imageUrl = uploadResponse.secure_url;
+      } catch (error) {
+        console.error("Error uploading image:", error);
+        return res.status(500).json({ error: "Failed to upload image" });
+      }
     }
 
     const newMessage = new Message({
@@ -57,8 +65,10 @@ export const sendMessage = async (req, res) => {
 
     await newMessage.save();
 
+    // Get receiver's socket id and send message
     const receiverSocketId = getReceiverSocketId(receiverId);
     if (receiverSocketId) {
+      const io = req.app.get("io");
       io.to(receiverSocketId).emit("newMessage", newMessage);
     }
 

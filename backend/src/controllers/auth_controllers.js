@@ -1,10 +1,18 @@
 import { generateToken } from "../lib/utils.js";
 import User from "../models/user_model.js";
+import OTP from "../models/otp_model.js";
 import bcrypt from "bcryptjs";
 import cloudinary from "../lib/cloudinary.js";
+import { sendVerificationEmail } from "../lib/email_service.js";
+import crypto from "crypto";
 
 // Helper function to validate a 10-digit phone number
 const isValidPhoneNumber = (number) => /^\d{10}$/.test(number);
+
+// Generate a 6-digit OTP
+const generateOTP = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
 
 export const signup = async (req, res) => {
   const { fullName, email, password, number } = req.body;
@@ -30,29 +38,110 @@ export const signup = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
+    // Generate OTP
+    const otp = generateOTP();
+    
+    // Save OTP to database
+    await OTP.findOneAndUpdate(
+      { email },
+      { otp },
+      { upsert: true, new: true }
+    );
+
+    // Send verification email
+    const emailSent = await sendVerificationEmail(email, otp);
+    if (!emailSent) {
+      return res.status(500).json({ message: "Failed to send verification email" });
+    }
+
+    // Create new user with unverified status
     const newUser = new User({
       fullName,
       email,
       number,
       password: hashedPassword,
+      isEmailVerified: false,
+      verificationToken: crypto.randomBytes(32).toString("hex"),
     });
 
-    if (newUser) {
-      generateToken(newUser._id, res);
-      await newUser.save();
+    await newUser.save();
 
-      res.status(201).json({
-        _id: newUser._id,
-        fullName: newUser.fullName,
-        email: newUser.email,
-        number: newUser.number,
-        profilePic: newUser.profilePic,
-      });
-    } else {
-      res.status(400).json({ message: "Invalid user data" });
-    }
+    res.status(201).json({
+      message: "User created successfully. Please verify your email.",
+      email: newUser.email,
+    });
   } catch (error) {
     console.log("Error in signup controller", error.message);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+export const verifyOTP = async (req, res) => {
+  const { email, otp } = req.body;
+
+  try {
+    const otpRecord = await OTP.findOne({ email });
+    if (!otpRecord) {
+      return res.status(400).json({ message: "OTP not found or expired" });
+    }
+
+    if (otpRecord.otp !== otp) {
+      return res.status(400).json({ message: "Invalid OTP" });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.isEmailVerified = true;
+    await user.save();
+    await OTP.deleteOne({ email });
+
+    generateToken(user._id, res);
+
+    res.status(200).json({
+      _id: user._id,
+      fullName: user.fullName,
+      email: user.email,
+      number: user.number,
+      profilePic: user.profilePic,
+      isEmailVerified: true,
+    });
+  } catch (error) {
+    console.log("Error in verifyOTP controller", error.message);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+export const resendOTP = async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(400).json({ message: "Email already verified" });
+    }
+
+    const otp = generateOTP();
+    await OTP.findOneAndUpdate(
+      { email },
+      { otp },
+      { upsert: true, new: true }
+    );
+
+    const emailSent = await sendVerificationEmail(email, otp);
+    if (!emailSent) {
+      return res.status(500).json({ message: "Failed to send verification email" });
+    }
+
+    res.status(200).json({ message: "OTP resent successfully" });
+  } catch (error) {
+    console.log("Error in resendOTP controller", error.message);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };

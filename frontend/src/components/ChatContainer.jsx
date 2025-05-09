@@ -87,7 +87,7 @@ const ChatContainer = () => {
                 <img
                   src={message.image}
                   alt="Attachment"
-                  className="max-w-[120px] sm:max-w-[200px] w-full rounded-md mb-2 cursor-pointer hover:opacity-80 transition"
+                  className="sm:max-w-[200px] rounded-md mb-2 cursor-pointer hover:opacity-80 transition"
                   onClick={() => setModalImage(message.image)}
                 />
               )}
@@ -97,8 +97,7 @@ const ChatContainer = () => {
         ))}
       </div>
 
-      {/* Show image upload button on all device sizes */}
-      <MessageInput showImageButtonOnMobile={true} />
+      <MessageInput />
     </div>
   );
 };

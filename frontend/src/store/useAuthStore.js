@@ -46,20 +46,35 @@ export const useAuthStore = create((set, get) => ({
   },
 
   verifyOTP: async ({ email, otp }) => {
+    if (!email || !otp) {
+      throw new Error("Email and OTP are required");
+    }
+
     try {
-      const res = await axiosInstance.post("/auth/verify-otp", { email, otp });
+      const res = await axiosInstance.post("/auth/verify-otp", { 
+        email: email.trim(),
+        otp: otp.trim()
+      });
+      
       set({ authUser: res.data });
       get().connectSocket();
       return res.data;
     } catch (error) {
+      console.error("OTP verification error:", error.response?.data);
       throw error;
     }
   },
 
   resendOTP: async ({ email }) => {
+    if (!email) {
+      throw new Error("Email is required");
+    }
+
     try {
-      await axiosInstance.post("/auth/resend-otp", { email });
+      const res = await axiosInstance.post("/auth/resend-otp", { email: email.trim() });
+      return res.data;
     } catch (error) {
+      console.error("Resend OTP error:", error.response?.data);
       throw error;
     }
   },
@@ -106,6 +121,61 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
+  followUser: async (userId) => {
+    try {
+      const res = await axiosInstance.post(`/users/request/${userId}`);
+      toast.success(res.data.message || "Follow request sent");
+      return res.data;
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to send follow request");
+      throw error;
+    }
+  },  
+  unfollowUser: async (userId) => {
+    try {
+      const res = await axiosInstance.post(`/users/unfollow/${userId}`);
+      
+      // Update the local authUser state for mutual unfollow
+      set((state) => ({
+        authUser: {
+          ...state.authUser,
+          following: state.authUser.following.filter(id => id !== userId),
+          followers: state.authUser.followers.filter(id => id !== userId),
+          followingCount: (state.authUser.followingCount || 0) - 1,
+          followersCount: (state.authUser.followersCount || 0) - 1
+        }
+      }));
+
+      // Disconnect chat if we were chatting with this user
+      const selectedUser = useChatStore.getState().selectedUser;
+      if (selectedUser?._id === userId) {
+        useChatStore.setState({ selectedUser: null, messages: [] });
+      }
+      
+      toast.success("Mutual unfollow completed");
+      return res.data;
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to unfollow");
+      throw error;
+    }
+  },
+
+  isFollowing: (userId) => {
+    const authUser = get().authUser;
+    return authUser?.following?.includes(userId) || false;
+  },
+
+  // This method will be used to update followers/following counts
+  updateFollowCounts: (counts) => {
+    set(state => ({
+      authUser: {
+        ...state.authUser,
+        followersCount: counts.followers,
+        followingCount: counts.following
+      }
+    }));
+  },
+
   connectSocket: () => {
     if (get().socket) return;
 
@@ -123,6 +193,29 @@ export const useAuthStore = create((set, get) => ({
 
     socket.on("getOnlineUsers", (users) => {
       set({ onlineUsers: users });
+    });
+
+    // Handle new follow requests
+    socket.on("new_follow_request", (data) => {
+      toast.success(`New follow request from ${data.fullName}`, {
+        duration: 4000,
+        position: "bottom-center",
+        icon: "👋",
+      });
+      
+      // You might want to update the UI to show the new request
+      // This could trigger a re-fetch of requests or update the state directly
+      const fetchRequests = async () => {
+        try {
+          const res = await axiosInstance.get("/users/requests");
+          // You might want to update some state here with the new requests
+          console.log("Updated requests:", res.data);
+        } catch (error) {
+          console.error("Failed to fetch requests:", error);
+        }
+      };
+      
+      fetchRequests();
     });
 
     socket.on("disconnect", () => {

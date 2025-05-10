@@ -1,24 +1,28 @@
 import express from "express";
 import { protectRoute } from "../middleware/auth_middleware.js";
 import User from "../models/user_model.js";
-import { getReceiverSocketId } from "../lib/socket.js";
 
 const router = express.Router();
 
 // Get all users
 router.get("/", protectRoute, async (req, res) => {
   try {
-    const currentUser = await User.findById(req.user._id).select("following followers");
+    // Get current user with following info
+    const currentUser = await User.findById(req.user._id)
+      .select("following followers");
+
+    // Get all other users with their followers/following
     const users = await User.find({ 
       _id: { $ne: req.user._id } 
     }).select("-password");
 
-    // Add a field to indicate mutual following
+    // Add mutual follow status to each user
     const usersWithMutualStatus = users.map(user => {
-      const isFollowingMe = user.followers.includes(req.user._id);
-      const amFollowing = currentUser.following.includes(user._id);
+      const userObj = user.toJSON();
+      const isFollowingMe = userObj.followers?.includes(req.user._id);
+      const amFollowing = currentUser.following?.includes(user._id);
       return {
-        ...user.toJSON(),
+        ...userObj,
         isMutualFollow: isFollowingMe && amFollowing
       };
     });
@@ -41,10 +45,7 @@ router.get("/requests", protectRoute, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Ensure followRequests exists
     const requests = user.followRequests || [];
-    
-    console.log("Follow requests found:", requests.length); // Debug log
     res.status(200).json(requests);
   } catch (error) {
     console.error("Error fetching follow requests:", error);
@@ -108,7 +109,6 @@ router.post("/request/:id", protectRoute, async (req, res) => {
     const senderId = req.user._id;
     const receiverId = req.params.id;
 
-    // Validate IDs
     if (!senderId || !receiverId) {
       return res.status(400).json({ message: "Invalid request parameters" });
     }
@@ -117,50 +117,33 @@ router.post("/request/:id", protectRoute, async (req, res) => {
       return res.status(400).json({ message: "You cannot request to follow yourself." });
     }
 
-    // Find both users
     const [sender, receiver] = await Promise.all([
       User.findById(senderId),
       User.findById(receiverId)
     ]);
 
-    if (!receiver) {
-      return res.status(404).json({ message: "User to follow not found." });
+    if (!receiver || !sender) {
+      return res.status(404).json({ message: "User not found." });
     }
 
-    if (!sender) {
-      return res.status(404).json({ message: "Sender not found." });
-    }
-
-    // Check if already following
     if (sender.following.includes(receiverId)) {
       return res.status(400).json({ message: "Already following this user." });
     }
 
-    // Check if request already sent
     if (receiver.followRequests.includes(senderId)) {
       return res.status(400).json({ message: "Follow request already sent." });
     }
 
-    // Add request
     receiver.followRequests.push(senderId);
-    await receiver.save();    // Emit socket event for real-time notification
+    await receiver.save();
+
     const io = req.app.get("io");
     if (io) {
-      // Emit to specific user's socket
-      const receiverSocketId = getReceiverSocketId(receiverId);
-      if (receiverSocketId) {
-        io.to(receiverSocketId).emit("new_follow_request", {
-          userId: senderId,
-          username: sender.username,
-          fullName: sender.fullName,
-          profilePic: sender.profilePic
-        });
-      }
-      
-      // Also emit a follow_request event for socket handling
-      io.emit("follow_request", {
-        from: senderId,
-        to: receiverId
+      io.to(receiverId).emit("follow-request", {
+        userId: senderId,
+        username: sender.username,
+        fullName: sender.fullName,
+        profilePic: sender.profilePic
       });
     }
 
@@ -182,7 +165,6 @@ router.post("/request/:id", protectRoute, async (req, res) => {
 router.post("/requests/:id/accept", protectRoute, async (req, res) => {
   try {
     const requestId = req.params.id;
-    // Fetch both users with all required fields
     const [user, requester] = await Promise.all([
       User.findById(req.user._id).select("+followRequests +followers"),
       User.findById(requestId).select("+following")
@@ -192,12 +174,10 @@ router.post("/requests/:id/accept", protectRoute, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Check if request exists
     if (!user.followRequests || !user.followRequests.includes(requestId)) {
       return res.status(400).json({ message: "No follow request from this user" });
     }
 
-    // Prepare updates
     const userUpdate = {
       $pull: { followRequests: requestId },
       $addToSet: { followers: requestId }
@@ -207,13 +187,11 @@ router.post("/requests/:id/accept", protectRoute, async (req, res) => {
       $addToSet: { following: user._id }
     };
 
-    // Apply updates atomically
     await Promise.all([
       User.updateOne({ _id: user._id }, userUpdate),
       User.updateOne({ _id: requestId }, requesterUpdate)
     ]);
 
-    // Emit socket event
     const io = req.app.get("io");
     if (io) {
       io.to(requestId).emit("requestAccepted", { 
@@ -249,18 +227,15 @@ router.post("/requests/:id/reject", protectRoute, async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Check if request exists
     if (!user.followRequests || !user.followRequests.includes(requestId)) {
       return res.status(400).json({ message: "No follow request from this user" });
     }
 
-    // Remove request using atomic operation
     await User.updateOne(
       { _id: user._id },
       { $pull: { followRequests: requestId } }
     );
 
-    // Emit socket event
     const io = req.app.get("io");
     if (io) {
       io.to(requestId).emit("requestRejected", { userId: user._id });
@@ -277,7 +252,11 @@ router.post("/requests/:id/reject", protectRoute, async (req, res) => {
 router.post("/follow/:id", protectRoute, async (req, res) => {
   const userId = req.user._id;
   const targetId = req.params.id;
-  if (userId === targetId) return res.status(400).json({ message: "You cannot follow yourself." });
+  
+  if (userId === targetId) {
+    return res.status(400).json({ message: "You cannot follow yourself." });
+  }
+
   try {
     const user = await User.findById(userId).select("username following");
     const target = await User.findById(targetId).select("username followers");
@@ -301,7 +280,9 @@ router.post("/follow/:id", protectRoute, async (req, res) => {
     await target.save();
 
     const io = req.app.get("io");
-    io.emit("follow", { followerId: userId, followedId: targetId });
+    if (io) {
+      io.emit("follow", { followerId: userId, followedId: targetId });
+    }
 
     res.status(200).json({
       message: "Followed successfully.",
@@ -318,43 +299,41 @@ router.post("/follow/:id", protectRoute, async (req, res) => {
 router.post("/unfollow/:id", protectRoute, async (req, res) => {
   const userId = req.user._id;
   const targetId = req.params.id;
-  if (userId === targetId) return res.status(400).json({ message: "You cannot unfollow yourself." });
+  
+  if (userId === targetId) {
+    return res.status(400).json({ message: "You cannot unfollow yourself." });
+  }
+
   try {
     const user = await User.findById(userId);
-    const target = await User.findById(targetId);    if (!user || !target) return res.status(404).json({ message: "User not found." });
-    if (!user.following.includes(targetId)) return res.status(400).json({ message: "Not following this user." });
+    const target = await User.findById(targetId);
     
-    // Remove the follow relationship in both directions
+    if (!user || !target) {
+      return res.status(404).json({ message: "User not found." });
+    }
+    
+    if (!user.following.includes(targetId)) {
+      return res.status(400).json({ message: "Not following this user." });
+    }
+    
     user.following = user.following.filter(id => id.toString() !== targetId);
     target.followers = target.followers.filter(id => id.toString() !== userId);
     
-    // Also make the target user unfollow the user (mutual unfollow)
-    target.following = target.following.filter(id => id.toString() !== userId);
-    user.followers = user.followers.filter(id => id.toString() !== targetId);
-    
-    await Promise.all([user.save(), target.save()]);    const io = req.app.get("io");
-    
-    // Emit mutual unfollow events to both users
-    io.to(userId).to(targetId).emit("mutualUnfollow", { 
-      initiatorId: userId,
-      otherUserId: targetId,
-      initiatorName: user.fullName,
-      otherUserName: target.fullName
-    });
-    
+    await user.save();
+    await target.save();
+
+    const io = req.app.get("io");
+    if (io) {
+      io.emit("unfollow", { unfollowerId: userId, unfollowedId: targetId });
+    }
+
     res.status(200).json({
-      message: "Mutual unfollow successful.",
-      myFollowersCount: user.followers.length,
-      myFollowingCount: user.following.length,
-      theirFollowersCount: target.followers.length,
-      theirFollowingCount: target.following.length,
-      unfollowedUser: {
-        _id: target._id,
-        username: target.username,
-        fullName: target.fullName
-      }
+      message: "Unfollowed successfully.",
+      followersCount: target.followers.length,
+      followingCount: user.following.length
     });
   } catch (error) {
+    console.error("Error in unfollow endpoint:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 });

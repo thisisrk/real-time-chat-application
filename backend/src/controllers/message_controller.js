@@ -23,6 +23,18 @@ export const getMessages = async (req, res) => {
     const { id: userToChatId } = req.params;
     const myId = req.user._id;
 
+    // Check for mutual following
+    const [me, otherUser] = await Promise.all([
+      User.findById(myId),
+      User.findById(userToChatId)
+    ]);
+
+    const isMutualFollow = me.following.includes(userToChatId) && otherUser.following.includes(myId);
+
+    if (!isMutualFollow) {
+      return res.status(403).json({ error: "Both users must follow each other to chat." });
+    }
+
     const messages = await Message.find({
       $or: [
         { senderId: myId, receiverId: userToChatId },
@@ -42,6 +54,18 @@ export const sendMessage = async (req, res) => {
     const { text, image } = req.body || {};
     const { id: receiverId } = req.params;
     const senderId = req.user._id;
+
+    // Check for mutual following
+    const [sender, receiver] = await Promise.all([
+      User.findById(senderId),
+      User.findById(receiverId)
+    ]);
+
+    const isMutualFollow = sender.following.includes(receiverId) && receiver.following.includes(senderId);
+
+    if (!isMutualFollow) {
+      return res.status(403).json({ error: "Both users must follow each other to chat." });
+    }
 
     if (!text && !image) {
       return res.status(400).json({ error: "Message must contain either text or image" });

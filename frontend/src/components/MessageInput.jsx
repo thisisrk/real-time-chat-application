@@ -1,15 +1,24 @@
 import { useRef, useState } from "react";
 import { useChatStore } from "../store/useChatStore";
-import { Image, Send, X } from "lucide-react";
+import { useAuthStore } from "../store/useAuthStore";
+import { Image, Send, X, Users } from "lucide-react";
 import toast from "react-hot-toast";
 
 const MessageInput = ({ showImageButtonOnMobile }) => {
   const [text, setText] = useState("");
   const [imagePreview, setImagePreview] = useState(null);
   const fileInputRef = useRef(null);
-  const { sendMessage } = useChatStore();
+  const { sendMessage, selectedUser } = useChatStore();
+  const { authUser } = useAuthStore();
+
+  const isMutualFollow = selectedUser?.following?.includes(authUser._id) && authUser?.following?.includes(selectedUser._id);
 
   const handleImageChange = (e) => {
+    if (!isMutualFollow) {
+      toast.error("Both users must follow each other to send messages");
+      return;
+    }
+
     const file = e.target.files[0];
     if (!file.type.startsWith("image/")) {
       toast.error("Please select an image file");
@@ -32,6 +41,11 @@ const MessageInput = ({ showImageButtonOnMobile }) => {
     e.preventDefault();
     if (!text.trim() && !imagePreview) return;
 
+    if (!isMutualFollow) {
+      toast.error("Both users must follow each other to send messages");
+      return;
+    }
+
     try {
       await sendMessage({
         text: text.trim(),
@@ -43,63 +57,82 @@ const MessageInput = ({ showImageButtonOnMobile }) => {
       setImagePreview(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (error) {
+      if (error.response?.status === 403) {
+        toast.error("Both users must follow each other to send messages");
+      } else {
+        toast.error("Failed to send message");
+      }
       console.error("Failed to send message:", error);
     }
   };
 
   return (
     <div className="p-4 w-full">
-      {imagePreview && (
-        <div className="mb-3 flex items-center gap-2">
-          <div className="relative">
-            <img
-              src={imagePreview}
-              alt="Preview"
-              className="w-20 h-20 object-cover rounded-lg border border-zinc-700"
+      {!isMutualFollow ? (
+        <div className="flex items-center justify-center gap-2 text-warning bg-warning/10 p-3 rounded-lg">
+          <Users className="w-5 h-5" />
+          <p>You need to follow each other to start messaging</p>
+        </div>
+      ) : (
+        <form onSubmit={handleSendMessage} className="flex items-end gap-2">
+          {/* Image preview */}
+          {imagePreview && (
+            <div className="relative">
+              <img
+                src={imagePreview}
+                alt="Preview"
+                className="w-16 h-16 object-cover rounded-lg"
+              />
+              <button
+                type="button"
+                onClick={removeImage}
+                className="absolute -top-1 -right-1 bg-error text-white rounded-full p-1"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+
+          <div className="flex-1 flex items-end gap-2">
+            {/* Message input */}
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={isMutualFollow ? "Type a message" : "Follow each other to chat"}
+              rows="1"
+              className="textarea textarea-bordered flex-1 resize-none"
+              disabled={!isMutualFollow}
             />
+
+            {/* Image upload button */}
             <button
-              onClick={removeImage}
-              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-base-300 flex items-center justify-center"
               type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className={`btn btn-circle btn-ghost ${!isMutualFollow && 'btn-disabled'}`}
+              disabled={!isMutualFollow}
             >
-              <X className="size-3" />
+              <Image className="w-5 h-5" />
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageChange}
+                ref={fileInputRef}
+                className="hidden"
+                disabled={!isMutualFollow}
+              />
+            </button>
+
+            {/* Send button */}
+            <button 
+              type="submit" 
+              className={`btn btn-circle btn-primary ${!isMutualFollow && 'btn-disabled'}`}
+              disabled={!isMutualFollow || (!text.trim() && !imagePreview)}
+            >
+              <Send className="w-5 h-5" />
             </button>
           </div>
-        </div>
+        </form>
       )}
-
-      <form onSubmit={handleSendMessage} className="flex items-center gap-2 w-full">
-        <input
-          type="text"
-          className="flex-1 input input-bordered rounded-lg input-sm sm:input-md"
-          placeholder="Type a message..."
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-        />
-        <input
-          type="file"
-          accept="image/*"
-          className="hidden"
-          ref={fileInputRef}
-          onChange={handleImageChange}
-        />
-        <button
-          type="button"
-          className={`btn btn-sm btn-circle flex items-center justify-center bg-primary text-primary-content hover:bg-primary-focus ${showImageButtonOnMobile ? "" : "hidden sm:flex"}`}
-          style={{ minWidth: '2.5rem', minHeight: '2.5rem' }}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <Image size={20} />
-        </button>
-        <button
-          type="submit"
-          className="btn btn-sm btn-circle flex items-center justify-center bg-primary text-primary-content hover:bg-primary-focus"
-          style={{ minWidth: '2.5rem', minHeight: '2.5rem' }}
-          disabled={!text.trim() && !imagePreview}
-        >
-          <Send size={20} />
-        </button>
-      </form>
     </div>
   );
 };

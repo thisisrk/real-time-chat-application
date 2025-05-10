@@ -21,7 +21,7 @@ const ChatContainer = () => {
   const [modalImage, setModalImage] = useState(null);
 
   useEffect(() => {
-    getMessages(selectedUser._id);
+    getMessages(selectedUser._id);  
 
     subscribeToMessages();
 

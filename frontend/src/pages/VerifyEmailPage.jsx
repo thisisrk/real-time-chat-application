@@ -28,19 +28,28 @@ const VerifyEmailPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (otp.length !== 6) {
+    
+    // Validate OTP format
+    if (!/^\d{6}$/.test(otp)) {
       toast.error("Please enter a valid 6-digit OTP");
       return;
     }
 
     setIsVerifying(true);
     try {
-      await verifyOTP({ email, otp });
-      localStorage.removeItem("verificationEmail"); // Clear stored email
+      await verifyOTP({ email, otp: otp.trim() });
+      localStorage.removeItem("verificationEmail");
       toast.success("Email verified successfully!");
       navigate("/");
     } catch (error) {
-      toast.error(error.response?.data?.message || "Verification failed");
+      const errorMessage = error.response?.data?.message;
+      if (errorMessage === "OTP not found or expired") {
+        toast.error("Your OTP has expired. Please request a new one.");
+      } else if (errorMessage === "Invalid OTP") {
+        toast.error("Invalid OTP. Please check and try again.");
+      } else {
+        toast.error(errorMessage || "Verification failed. Please try again.");
+      }
     } finally {
       setIsVerifying(false);
     }
@@ -146,4 +155,4 @@ const VerifyEmailPage = () => {
   );
 };
 
-export default VerifyEmailPage; 
+export default VerifyEmailPage;

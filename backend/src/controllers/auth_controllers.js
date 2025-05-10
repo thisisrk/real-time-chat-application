@@ -52,6 +52,15 @@ export const signup = async (req, res) => {
     const emailSent = await sendVerificationEmail(email, otp);
     if (!emailSent) {
       return res.status(500).json({ message: "Failed to send verification email" });
+    }    // Generate a username from email (part before @)
+    const baseUsername = email.split('@')[0];
+    
+    // Check if username exists and generate a unique one if needed
+    let username = baseUsername;
+    let counter = 1;
+    while (await User.findOne({ username })) {
+      username = `${baseUsername}${counter}`;
+      counter++;
     }
 
     // Create new user with unverified status
@@ -59,6 +68,7 @@ export const signup = async (req, res) => {
       fullName,
       email,
       number,
+      username,
       password: hashedPassword,
       isEmailVerified: false,
       verificationToken: crypto.randomBytes(32).toString("hex"),
@@ -80,17 +90,30 @@ export const verifyOTP = async (req, res) => {
   const { email, otp } = req.body;
 
   try {
+    console.log("Verifying OTP for email:", email);
+    console.log("Received OTP:", otp);
+
+    if (!email || !otp) {
+      console.log("Missing required fields - email or OTP");
+      return res.status(400).json({ message: "Email and OTP are required" });
+    }
+
     const otpRecord = await OTP.findOne({ email });
+    console.log("OTP record found:", otpRecord);
+    
     if (!otpRecord) {
+      console.log("No OTP record found for email:", email);
       return res.status(400).json({ message: "OTP not found or expired" });
     }
 
     if (otpRecord.otp !== otp) {
+      console.log("OTP mismatch. Expected:", otpRecord.otp, "Received:", otp);
       return res.status(400).json({ message: "Invalid OTP" });
     }
 
     const user = await User.findOne({ email });
     if (!user) {
+      console.log("User not found for email:", email);
       return res.status(404).json({ message: "User not found" });
     }
 
@@ -105,11 +128,12 @@ export const verifyOTP = async (req, res) => {
       fullName: user.fullName,
       email: user.email,
       number: user.number,
+      username: user.username,
       profilePic: user.profilePic,
       isEmailVerified: true,
     });
   } catch (error) {
-    console.log("Error in verifyOTP controller", error.message);
+    console.log("Error in verifyOTP controller:", error.message);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
@@ -217,14 +241,46 @@ export const logout = (req, res) => {
 
 export const updateProfile = async (req, res) => {
   try {
-    const { profilePic, number } = req.body;
+    const { profilePic, number, username, bio, birthday } = req.body;
     const userId = req.user._id;
 
     const updateData = {};
 
     if (profilePic) {
-      const uploadResponse = await cloudinary.uploader.upload(profilePic);
-      updateData.profilePic = uploadResponse.secure_url;
+      try {
+        // Retry upload up to 3 times
+        let uploadResponse;
+        let attempts = 0;
+        const maxAttempts = 3;
+
+        while (!uploadResponse && attempts < maxAttempts) {
+          try {
+            uploadResponse = await cloudinary.uploader.upload(profilePic, {
+              timeout: 60000,
+              resource_type: "auto",
+              quality: "auto:good",
+              fetch_format: "auto",
+              flags: "attachment",
+              transformation: [
+                { width: 500, crop: "limit" },
+                { quality: "auto:good" }
+              ]
+            });
+          } catch (uploadError) {
+            attempts++;
+            if (attempts === maxAttempts) throw uploadError;
+            // Wait for 2 seconds before retrying
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
+
+        updateData.profilePic = uploadResponse.secure_url;
+      } catch (uploadError) {
+        console.error("Error uploading image:", uploadError);
+        return res.status(500).json({ 
+          message: "Failed to upload image. Please try again with a smaller image or check your connection."
+        });
+      }
     }
 
     if (number) {
@@ -234,11 +290,37 @@ export const updateProfile = async (req, res) => {
       updateData.number = number;
     }
 
-    const updatedUser = await User.findByIdAndUpdate(userId, updateData, { new: true });
+    if (username) {
+      const existing = await User.findOne({ 
+        username: { $regex: `^${username}$`, $options: 'i' }, 
+        _id: { $ne: userId } 
+      });
+      if (existing) {
+        return res.status(400).json({ message: "Username already taken" });
+      }
+      updateData.username = username;
+    }
+
+    if (typeof bio === 'string') {
+      updateData.bio = bio;
+    }
+
+    if (birthday) {
+      updateData.birthday = birthday;
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId, 
+      updateData, 
+      { new: true, runValidators: true }
+    ).select('-password');
 
     res.status(200).json(updatedUser);
   } catch (error) {
-    console.log("Error in updateProfile controller:", error.message);
+    console.error("Error in updateProfile controller:", error);
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: "Internal Server Error" });
   }
 };

@@ -8,8 +8,7 @@
   },
   "scripts": {
     "dev": "nodemon src/index.js",
-    "start": "node src/index.js",
-    "build": "npm install"
+    "start": "node src/index.js"
   },
   "keywords": [],
   "author": "",
@@ -24,7 +23,8 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.8.1",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "whatsapp-clone---1-final": "file:.."
   },
   "devDependencies": {
     "nodemon": "^3.1.7"

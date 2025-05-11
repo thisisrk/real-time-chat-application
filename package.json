@@ -1,29 +1,14 @@
 {
-  "name": "whatsapp-clone",
+  "name": "whatsapp-clone---1-final",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
-    "install-backend": "cd backend && npm install",
-    "install-frontend": "cd frontend && npm install",
-    "build-frontend": "cd frontend && npm run build",
-    "build": "npm run install-backend && npm run install-frontend && npm run build-frontend",
-    "start": "cd backend && npm start"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/thisisrk/Real-Time-Chat-Application.git"
+    "build":"npm install --prefix backend && npm install --prefix frontend && npm run build --prefix frontend",
+  "start": "npm run start --prefix backend"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "module",
-  "bugs": {
-    "url": "https://github.com/thisisrk/Real-Time-Chat-Application/issues"
-  },
-  "homepage": "https://github.com/thisisrk/Real-Time-Chat-Application#readme",
-  "dependencies": {
-    "express": "^5.1.0",
-    "nodemailer": "^7.0.2"
-  }
+  "type": "module"
 }

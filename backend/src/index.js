@@ -9,6 +9,8 @@ import connectDB from "./lib/db.js";
 import authRoutes from "./routes/auth_route.js";
 import messageRoutes from "./routes/message_route.js";
 import userRoutes from "./routes/user_route.js";
+import path from "path";
+
 
 // Load environment variables
 dotenv.config();
@@ -59,6 +61,16 @@ app.use((err, req, res, next) => {
       : err.message 
   });
 });
+
+if(process.env.NODE_ENV === "production") {
+  // Serve static files from the React frontend app
+  app.use(express.static(path.join(__dirname, "../frontend/build")));
+
+  // The "catchall" handler: for any request that doesn't match one above, send back index.html.
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(__dirname, "../frontend","dist","index.html"));
+  });
+}
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
